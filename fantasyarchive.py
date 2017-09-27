@@ -35,8 +35,8 @@ def get_stat_labels(soup):
     stat_labels = np.insert(stat_labels, 5, "POS")
     return stat_labels
 
-def get_hitting_individual_stats(soup):
-    """Return the table of hitting stats along with the accompanying player
+def get_individual_stats(soup):
+    """Return the table of individual stats along with the accompanying player
     info.
 
     :param soup:
@@ -45,37 +45,28 @@ def get_hitting_individual_stats(soup):
           extra info
         - 2D numpy array where each row is a player and each column is a stat
     """
-    hitter_stats_divs = soup.findAll("tr", {"class": "pncPlayerRow"})
-    hitter_stats = np.zeros([len(hitter_stats_divs),
-                             len(hitter_stats_divs[0].contents) - 2])
-    hitter_infos = np.empty([len(hitter_stats_divs), 4], dtype='object')
+    stats_divs = soup.findAll("tr", {"class": "pncPlayerRow"})
+    stats = np.zeros([len(stats_divs),
+                             len(stats_divs[0].contents) - 2])
+    infos = np.empty([len(stats_divs), 4], dtype='object')
 
-    for i in range(0, len(hitter_stats_divs)):
-        name_string = hitter_stats_divs[i].contents[0].text
+    for i in range(0, len(stats_divs)):
+        name_string = stats_divs[i].contents[0].text
         pname, mteam, pos = parse_name_string(name_string)
-        id = hitter_stats_divs[i].contents[0].contents[0].attrs['playerid']
-        hitter_infos[i][0] = pname
-        hitter_infos[i][1] = id
-        hitter_infos[i][2] = mteam
-        hitter_infos[i][3] = pos
-        for j in range(2, len(hitter_stats_divs[i].contents)):
-            stat = hitter_stats_divs[i].contents[j].text
+        id = stats_divs[i].contents[0].contents[0].attrs['playerid']
+        infos[i][0] = pname
+        infos[i][1] = id
+        infos[i][2] = mteam
+        infos[i][3] = pos
+        for j in range(2, len(stats_divs[i].contents)):
+            stat = stats_divs[i].contents[j].text
             # Ignore ESPN using '--' for zero stats
             if stat == '--':
                 stat = 0.0
-            hitter_stats[i][j-2] = stat
-    return (hitter_infos, hitter_stats)
+            stats[i][j-2] = stat
+    return (infos, stats)
 
-def get_hitting_team_stats():
-    pass
-
-def get_pitching_stat_lables():
-    pass
-
-def get_pitching_individual_stats():
-    pass
-
-def get_pitching_team_stats():
+def get_team_stats():
     pass
 
 def parse_name_string(name_string):
@@ -116,30 +107,39 @@ def scrape_team_year(browser, league, year, team, stat_type):
     soup = BeautifulSoup(html_source, 'html.parser')
     return soup
 
-def build_team_year_data_frame(browser, league, year, team, stat_type):
+def build_indiv_team_year_data_frame(browser, league, year, team, stat_type):
+    """Build a Pandas DataFrame for the team's individual  hitting or pitching
+    fantasy year.
+
+    :param browser: Selenium browser object
+    :param league: league id number (int)
+    :param year: fantasy season year (int)
+    :param team: fantasy team id (int)
+    :param stat_type: 1 for hitting stats, 2 for pitching stats (int)
+    :return: Pandas DataFrame for with the teams hitting or pitching yearly
+             stats
+    """
 
     soup = scrape_team_year(browser, league, year, team, stat_type)
 
-    hit_stat_labels = get_stat_labels(soup)
-    print(hit_stat_labels)
+    stat_labels = get_stat_labels(soup)
 
-    hit_indiv_info, hit_indiv_stats = get_hitting_individual_stats(soup)
-    #print(hit_indiv_info)
+    indiv_info, indiv_stats = get_individual_stats(soup)
+
     np.set_printoptions(suppress=True)
-    #print(hit_indiv_stats)
 
     # Populate dataframe with an OrderedDict
     d = collections.OrderedDict()
-    team_size = hit_indiv_info.shape[0]
-    d[hit_stat_labels[0]] = hit_indiv_info[:, 0]
-    d[hit_stat_labels[1]] = hit_indiv_info[:, 1]
-    d[hit_stat_labels[2]] = np.repeat(year, team_size, axis=0)
-    d[hit_stat_labels[3]] = np.repeat(team, team_size, axis=0)
-    d[hit_stat_labels[4]] = hit_indiv_info[:, 2]
-    d[hit_stat_labels[5]] = hit_indiv_info[:, 3]
+    team_size = indiv_info.shape[0]
+    d[stat_labels[0]] = indiv_info[:, 0]
+    d[stat_labels[1]] = indiv_info[:, 1]
+    d[stat_labels[2]] = np.repeat(year, team_size, axis=0)
+    d[stat_labels[3]] = np.repeat(team, team_size, axis=0)
+    d[stat_labels[4]] = indiv_info[:, 2]
+    d[stat_labels[5]] = indiv_info[:, 3]
 
     # Create a dictionary from numpy label array and stats matrix
-    stat_d = dict(zip(hit_stat_labels[6:], hit_indiv_stats.T))
+    stat_d = dict(zip(stat_labels[6:], indiv_stats.T))
 
     # Merge the dictionaries
     d.update(stat_d)
@@ -154,15 +154,20 @@ if __name__ == "__main__":
 
     years = range(2007, 2017)
     league_id = 4779
-    num_teams = 12
+    num_teams = 1
 
     # TODO: Headless browser with Phantom.js
     browser = webdriver.Firefox(executable_path=r'/usr/local/Cellar/geckodriver/0.18.0/bin/geckodriver')
 
-    year_df = pd.DataFrame()
+    hit_year_df = pd.DataFrame()
+    pitch_year_df = pd.DataFrame()
     for i in range(1, num_teams + 1):
-        team_year_df = build_team_year_data_frame(browser, 4779, 2017, i, 1)
-        year_df = pd.concat([year_df, team_year_df], axis=0)
+        # Hitting for the team and year
+        hit_team_year_df = build_indiv_team_year_data_frame(browser, 4779, 2017, i, 1)
+        hit_year_df = pd.concat([hit_year_df, hit_team_year_df], axis=0)
+        # Pitching for the team and year
+        pitch_team_year_df = build_indiv_team_year_data_frame(browser, 4779, 2017, i, 1)
+        pitch_year_df = pd.concat([pitch_year_df, pitch_team_year_df], axis=0)
 
     browser.quit()
 
