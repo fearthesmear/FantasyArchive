@@ -5,12 +5,20 @@ Example URL:
 
 """
 
+import argparse
 import collections
 import pandas as pd
 import numpy as np
+import time
 from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
 from bs4 import BeautifulSoup
 
+# TODO: Headless browser. Maybe Phantom.js
+# TODO: Figure out how many owners instead of asking for it, since it my vary year to year.
+# TODO: Associate owner names?/team names? with fantasy team ID and carry in dataframe
+# TODO: Allow for manual mapping for owners/teams to player IDs.
+# TODO: Handle 2007 and before H/AB by breaking into H and AB.
 
 def get_stat_labels(soup):
     """Gets the table row of the stat names and inserts additional labels
@@ -20,14 +28,12 @@ def get_stat_labels(soup):
     """
     stat_labels = np.empty(0, dtype='object')
     stat_label_divs = soup.findAll("tr", {"class": "playerTableBgRowSubhead tableSubHead"})
-    for i in range(0, len(stat_label_divs[0].contents)):
-        if i != 1:
-            # Index 1 causes and error when parsing because the text is a single
-            # quote.
-            stat_label = stat_label_divs[0].contents[i].contents[0].text
-            stat_label = stat_label.replace(u'\xa0', u'')
-            stat_labels = np.append(stat_labels, stat_label)
+    for i in range(2, len(stat_label_divs[0].contents)):
+        stat_label = stat_label_divs[0].contents[i].contents[0].text
+        stat_label = stat_label.replace(u'\xa0', u'')
+        stat_labels = np.append(stat_labels, stat_label)
     # Insert a label for the player ID, MLB Teams, and Position
+    stat_labels = np.insert(stat_labels, 0, "PLAYER")
     stat_labels = np.insert(stat_labels, 1, "ID")
     stat_labels = np.insert(stat_labels, 2, "YEAR")
     stat_labels = np.insert(stat_labels, 3, "FANTASYTEAM")
@@ -49,11 +55,12 @@ def get_individual_stats(soup):
     stats = np.zeros([len(stats_divs),
                              len(stats_divs[0].contents) - 2])
     infos = np.empty([len(stats_divs), 4], dtype='object')
-
     for i in range(0, len(stats_divs)):
         name_string = stats_divs[i].contents[0].text
         pname, mteam, pos = parse_name_string(name_string)
-        id = stats_divs[i].contents[0].contents[0].attrs['playerid']
+        #id = stats_divs[i].contents[0].contents[0].attrs['playerid']
+        id = stats_divs[i].attrs['id']
+        id = id.replace("plyr", "")
         infos[i][0] = pname
         infos[i][1] = id
         infos[i][2] = mteam
@@ -148,28 +155,87 @@ def build_indiv_team_year_data_frame(browser, league, year, team, stat_type):
     return df
 
 
+def login(driver, username, password):
+    """ Log into ESPN
+    :param driver: Selenium webdriver instance
+    :param username: ESPN username
+    :param password: ESPN Password
+    """
+    # initialize variables
+    driver.get("http://games.espn.go.com/flb/signin")
+    wait = WebDriverWait(driver, 10)
+
+    # click Log In button
+    loginButtonXpath = "//*[@id='global-header']/div[2]/ul/li[2]/a"
+    loginButtonElement1 = wait.until(
+        lambda driver: driver.find_element_by_xpath(loginButtonXpath))
+    loginButtonElement1.click()
+
+    # find email and pass ID
+    emailFieldID = "//*[@id='did-ui']/div/div/section/section/form/section/div[1]/div/label/span[2]/input"
+    passFieldID = "//*[@id='did-ui']/div/div/section/section/form/section/div[2]/div/label/span[2]/input"
+
+    # switch to frame so script can type
+    driver.switch_to.frame("disneyid-iframe")
+
+    # find email input box and type in email
+    emailFieldElement = wait.until(
+        lambda driver: driver.find_element_by_xpath(emailFieldID))
+    emailFieldElement.click()
+    emailFieldElement.clear()
+    emailFieldElement.send_keys(username)
+
+    # find pass input box and type in password
+    passFieldElement = wait.until(
+        lambda driver: driver.find_element_by_xpath(passFieldID))
+    passFieldElement.click()
+    passFieldElement.clear()
+    passFieldElement.send_keys(password)
+
+    time.sleep(1.0)
+    # click log in button
+    loginButtonXpath2 = "//*[@id='did-ui']/div/div/section/section/form/section/div[3]/button[2]"
+    loginButtonElement2 = wait.until(
+        lambda driver: driver.find_element_by_xpath(loginButtonXpath2))
+    loginButtonElement2.click()
+
+    time.sleep(3.0)
+
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description='ESPN Fantasy Baseball '
+                                     'web scrapper that produces CSVs')
+    parser.add_argument('-u', '--username', required=True,
+                        help='ESPN username.')
+    parser.add_argument('-p', '--password', required=True,
+                        help='ESPN password.')
+    args = parser.parse_args()
 
     pd.set_option('display.expand_frame_repr', False)
 
-    years = range(2007, 2017)
+    years = np.arange(2017,2007,-1)
     league_id = 4779
-    num_teams = 1
+    num_teams = 12
 
-    # TODO: Headless browser with Phantom.js
     browser = webdriver.Firefox(executable_path=r'/usr/local/Cellar/geckodriver/0.18.0/bin/geckodriver')
+    login(browser, args.username, args.password)
 
-    hit_year_df = pd.DataFrame()
-    pitch_year_df = pd.DataFrame()
-    for i in range(1, num_teams + 1):
-        # Hitting for the team and year
-        hit_team_year_df = build_indiv_team_year_data_frame(browser, 4779, 2017, i, 1)
-        hit_year_df = pd.concat([hit_year_df, hit_team_year_df], axis=0)
-        # Pitching for the team and year
-        pitch_team_year_df = build_indiv_team_year_data_frame(browser, 4779, 2017, i, 1)
-        pitch_year_df = pd.concat([pitch_year_df, pitch_team_year_df], axis=0)
+    hit_indiv_df = pd.DataFrame()
+    pitch_indiv_df = pd.DataFrame()
+    for i in np.nditer(years):
+        for j in range(1, num_teams + 1):
+            # Hitting for the team and year
+            hit_team_year_df = build_indiv_team_year_data_frame(browser, 4779, i, j, 1)
+            hit_indiv_df = pd.concat([hit_indiv_df, hit_team_year_df], axis=0)
+            # Pitching for the team and year
+            pitch_team_year_df = build_indiv_team_year_data_frame(browser, 4779, i, j, 2)
+            pitch_indiv_df = pd.concat([pitch_indiv_df, pitch_team_year_df], axis=0)
+            print('Completed year {} for team {}'.format(i, j))
 
     browser.quit()
+
+    hit_indiv_df.to_csv('hit_indiv.csv', sep=',', encoding='utf-8')
+    pitch_indiv_df.to_csv('pitch_indiv.csv', sep=',', encoding='utf-8')
 
     pass
 
