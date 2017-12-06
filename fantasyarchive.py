@@ -5,6 +5,7 @@ Example URL:
 
 """
 
+import sys
 import argparse
 import collections
 import pandas as pd
@@ -128,9 +129,7 @@ def build_indiv_team_year_data_frame(browser, league, year, team, stat_type):
     """
 
     soup = scrape_team_year(browser, league, year, team, stat_type)
-
     stat_labels = get_stat_labels(soup)
-
     indiv_info, indiv_stats = get_individual_stats(soup)
 
     np.set_printoptions(suppress=True)
@@ -205,6 +204,12 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='ESPN Fantasy Baseball '
                                      'web scrapper that produces CSVs')
+    parser.add_argument('league_id',
+                        help='ESPN Fantasy Baseball League ID number')
+    parser.add_argument('startyear',
+                        help='Earliest year to include.')
+    parser.add_argument('stopyear',
+                        help='Latest year to include.')
     parser.add_argument('-u', '--username', required=True,
                         help='ESPN username.')
     parser.add_argument('-p', '--password', required=True,
@@ -213,13 +218,19 @@ if __name__ == "__main__":
 
     pd.set_option('display.expand_frame_repr', False)
 
-    years = np.arange(2017,2007,-1)
-    league_id = 4779
+    # Input parsing
+    if args.startyear > args.stopyear:
+        sys.exit("Input argument startyear cannot be large than stopyear. Exiting.")
+    years = np.arange(int(args.startyear),int(args.stopyear)+1)
+    league_id = args.league_id
     num_teams = 12
 
+    # Create a browser and login to ESPN
     browser = webdriver.Firefox(executable_path=r'/usr/local/Cellar/geckodriver/0.18.0/bin/geckodriver')
     login(browser, args.username, args.password)
 
+    # Build hitting and pitching data frames that include each year and team's
+    # active stats.
     hit_indiv_df = pd.DataFrame()
     pitch_indiv_df = pd.DataFrame()
     for i in np.nditer(years):
